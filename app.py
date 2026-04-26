@@ -17,6 +17,12 @@ from src.auth import is_auth_disabled, require_login, role_can_edit_settings, ro
 from src.cascade.cascade_detector import compute_kpis, detect_cascade_multi
 from src.cascade.ranking import compute_priority
 from src.config import MVP_LIMITATION_WARNING
+from src.decision import (
+    StressScenario,
+    build_reaccommodation_list,
+    run_stress_test,
+    suggest_recovery_options,
+)
 from src.export.excel_exporter import export_to_excel
 from src.export.pdf_briefing import build_briefing_pdf
 from src.i18n import available_locales, set_locale, t
@@ -135,7 +141,10 @@ if whatif_enabled:
         "What-if End Time", value=event_inputs[0]["end_time"], key="wi_end"
     )
 
-run_analysis = st.sidebar.button("Run Analysis", type="primary")
+run_analysis_clicked = st.sidebar.button("Run Analysis", type="primary")
+if run_analysis_clicked:
+    st.session_state["analysis_active"] = True
+analysis_active = bool(st.session_state.get("analysis_active"))
 
 # ─── Main area ──────────────────────────────────────────────────────────
 st.title(t("app.title"))
@@ -146,7 +155,7 @@ if not uploaded_files:
     st.info("Upload one or more DayRepReport files in the sidebar to begin analysis.")
     st.stop()
 
-if not run_analysis:
+if not analysis_active:
     st.info("Configure parameters in the sidebar and click **Run Analysis**.")
     st.stop()
 
@@ -510,6 +519,115 @@ else:
         )
 
     st.dataframe(affected_display, use_container_width=True, hide_index=True)
+
+# ─── Decision Support (Sprint 7) ───────────────────────────────────────
+with st.expander("Decision support — recovery options & reaccommodation", expanded=False):
+    st.caption(
+        "Advisory only. Rule-based suggestions to surface options the DM might "
+        "miss during a fast-moving event. Final decisions remain with OCC."
+    )
+
+    if affected.empty:
+        st.info("No affected flights — no recovery options to suggest.")
+    else:
+        # Recovery options per L1
+        first_event_end = events[0].end_time
+        closure_end_minutes = first_event_end.hour * 60 + first_event_end.minute
+        recovery_opts = suggest_recovery_options(df_result, closure_end_minutes=closure_end_minutes)
+        if recovery_opts:
+            st.markdown("**Recovery options (per Level-1 flight, sorted best→worst)**")
+            recovery_df = pd.DataFrame(
+                [
+                    {
+                        "flight_no": o.flight_no,
+                        "aircraft_reg": o.aircraft_reg,
+                        "option": o.option,
+                        "swap_to": o.swap_candidate_reg or "",
+                        "pax": o.pax_affected,
+                        "cost_usd": round(o.cost_usd, 2),
+                        "score": round(o.score, 1),
+                        "description": o.description,
+                    }
+                    for o in recovery_opts
+                ]
+            )
+            st.dataframe(recovery_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No Level-1 flights — no recovery options to suggest.")
+
+        # Pax reaccommodation list
+        st.markdown("**Pax reaccommodation priority list**")
+        reaccom = build_reaccommodation_list(df_result)
+        if reaccom:
+            reaccom_df = pd.DataFrame(
+                [
+                    {
+                        "rank": r.rank,
+                        "flight_no": r.flight_no,
+                        "aircraft_reg": r.aircraft_reg,
+                        "route": f"{r.origin} → {r.destination}",
+                        "intl": "✓" if r.is_international else "",
+                        "level": r.impact_level,
+                        "depth": r.cascade_depth,
+                        "pax": r.est_pax,
+                        "rationale": r.rationale,
+                    }
+                    for r in reaccom
+                ]
+            )
+            st.dataframe(reaccom_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No affected flights to reaccommodate.")
+
+# ─── Network Stress Test (Sprint 7) ────────────────────────────────────
+with st.expander("Network stress test (multi-day what-if)", expanded=False):
+    st.caption(
+        "Project the current closure scenario across N days and combine "
+        "airports to estimate worst-case multi-day impact. Uses the loaded "
+        "schedule as the proxy for every day."
+    )
+    col_a, col_b, col_c = st.columns(3)
+    stress_airports = col_a.multiselect(
+        "Airports to close (simultaneously each day)",
+        options=sorted({e.airport for e in events}) or ["HAN"],
+        default=[events[0].airport] if events else ["HAN"],
+    )
+    stress_days = col_b.number_input("Number of days", min_value=1, max_value=7, value=3, step=1)
+    stress_start_date = col_c.date_input(
+        "Scenario start date", value=events[0].closure_date if events else None
+    )
+    if st.button("Run stress test"):
+        scenario = StressScenario(
+            airports=tuple(stress_airports),
+            start_date=stress_start_date,
+            duration_days=int(stress_days),
+            closure_start=events[0].start_time,
+            closure_end=events[0].end_time,
+            closure_type=events[0].closure_type,
+        )
+        with st.spinner(f"Running {stress_days}-day stress test..."):
+            stress_result = run_stress_test(df, scenario)
+
+        if not stress_result.per_day:
+            st.warning("Empty result — check inputs.")
+        else:
+            st.markdown("**Per-day KPIs**")
+            st.dataframe(
+                pd.DataFrame(stress_result.per_day),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.markdown("**Aggregate totals across the scenario**")
+            totals = stress_result.totals
+            tcol1, tcol2, tcol3, tcol4 = st.columns(4)
+            tcol1.metric("Total affected", totals.get("affected_flights", 0))
+            tcol2.metric("Total pax disrupted", totals.get("total_pax_disrupted", 0))
+            tcol3.metric("Total cost (USD)", f"${totals.get('total_cost_usd', 0):,.0f}")
+            if stress_result.worst_day is not None:
+                tcol4.metric(
+                    "Worst day cost (USD)",
+                    f"${float(stress_result.worst_day.get('total_cost_usd', 0)):,.0f}",
+                )
 
 # ─── Aircraft Rotation Table View ──────────────────────────────────────
 st.subheader("Aircraft Rotation Detail")
