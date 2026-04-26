@@ -1,15 +1,23 @@
 """Two-pass cascade detection for airport closure impact analysis.
 
 Pass 1: Detect all Level 1 flights independently (arrival into or departure
-        from closed airport within the closure time window).
-Pass 2: Trace downstream cascade by aircraft registration, sorted by STD.
+        from a closed airport within the closure time window).
+Pass 2: Trace downstream cascade by aircraft registration, sorted by
+        ``(flight_date, std)`` for correct propagation across overnight rotations.
 
 Boundary rule: start inclusive, end exclusive.
     time >= closure_start AND time < closure_end
+
+Multi-airport closure (Sprint 3): when multiple events are passed, Pass 1 is
+run as the *union* of per-event Level-1 masks (a flight only needs to satisfy
+one event to be Level 1). Pass 2 runs once on the combined Level-1 set, so
+the cascade chain reflects the full multi-event impact rather than being
+fragmented per event.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import pandas as pd
@@ -50,38 +58,10 @@ def _impact_reason(level: int | None, is_dest: bool, is_orig: bool) -> str:
     return "Extended downstream cascade"
 
 
-def detect_cascade(
-    df: pd.DataFrame,
-    event: AirportClosureEvent,
-) -> pd.DataFrame:
-    """Run two-pass cascade detection.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Flight data with canonical columns including ``origin``,
-        ``destination``, ``std``, ``sta``, ``aircraft_reg``, ``flight_no``.
-    event : AirportClosureEvent
-        Airport closure event definition.
-
-    Returns
-    -------
-    pd.DataFrame
-        Input dataframe augmented with cascade columns:
-        ``impact_level_numeric``, ``impact_level_display``,
-        ``impact_reason``, ``cascade_root_flight``.
-    """
-    df = df.copy()
-
-    # Initialize cascade columns
-    df["impact_level_numeric"] = None
-    df["impact_reason"] = ""
-    df["cascade_root_flight"] = None
-    df["cascade_depth"] = 0
-
-    # --- Pass 1: Detect all Level 1 flights ---
-    # Filter by closure_date when flight_date is present so multi-day data
-    # only triggers Level 1 on the actual closure day.
+def _level1_masks_for_event(
+    df: pd.DataFrame, event: AirportClosureEvent
+) -> tuple[pd.Series, pd.Series]:
+    """Return (dest_affected, orig_affected) boolean masks for a single event."""
     on_closure_date = pd.Series(True, index=df.index)
     if "flight_date" in df.columns:
         on_closure_date = df["flight_date"] == event.closure_date
@@ -107,17 +87,50 @@ def detect_cascade(
             & on_closure_date
         )
 
-    level1_mask = dest_affected | orig_affected
+    return dest_affected, orig_affected
+
+
+def detect_cascade_multi(
+    df: pd.DataFrame,
+    events: Iterable[AirportClosureEvent],
+) -> pd.DataFrame:
+    """Two-pass cascade detection across one or more closure events.
+
+    Pass 1 takes the *union* of per-event Level-1 masks. Pass 2 runs once
+    on the combined Level-1 set so a single cascade chain is produced per
+    aircraft regardless of how many events touched it.
+    """
+    events_list = list(events)
+    if not events_list:
+        raise ValueError("detect_cascade_multi requires at least one closure event")
+
+    df = df.copy()
+
+    # Initialize cascade columns
+    df["impact_level_numeric"] = None
+    df["impact_reason"] = ""
+    df["cascade_root_flight"] = None
+    df["cascade_depth"] = 0
+
+    # --- Pass 1: union of per-event Level-1 masks ---
+    dest_union = pd.Series(False, index=df.index)
+    orig_union = pd.Series(False, index=df.index)
+    for event in events_list:
+        dest_e, orig_e = _level1_masks_for_event(df, event)
+        dest_union = dest_union | dest_e
+        orig_union = orig_union | orig_e
+
+    level1_mask = dest_union | orig_union
     df.loc[level1_mask, "impact_level_numeric"] = 1
 
-    # Set reasons for Level 1
+    # Set reasons for Level 1 (combined across events)
     for idx in df[level1_mask].index:
-        is_dest = bool(dest_affected.at[idx]) if idx in dest_affected.index else False
-        is_orig = bool(orig_affected.at[idx]) if idx in orig_affected.index else False
+        is_dest = bool(dest_union.at[idx])
+        is_orig = bool(orig_union.at[idx])
         df.at[idx, "impact_reason"] = _impact_reason(1, is_dest, is_orig)
         df.at[idx, "cascade_root_flight"] = df.at[idx, "flight_no"]
 
-    # --- Pass 2: Trace downstream by aircraft registration ---
+    # --- Pass 2: trace downstream cascade by aircraft registration ---
     # Sort within each aircraft group by (flight_date, std) so cascade
     # propagates correctly across overnight rotations.
     sort_keys = [k for k in ("flight_date", "std") if k in df.columns]
@@ -152,10 +165,21 @@ def detect_cascade(
                         df.at[root_idx, "cascade_depth"] = depth
                     cascade_level += 1
 
-    # --- Generate display level ---
     df["impact_level_display"] = df["impact_level_numeric"].apply(display_impact_level)
 
     return df
+
+
+def detect_cascade(
+    df: pd.DataFrame,
+    event: AirportClosureEvent,
+) -> pd.DataFrame:
+    """Run two-pass cascade detection for a single closure event.
+
+    Thin shim around :func:`detect_cascade_multi` for callers that only have
+    one event. Behaviour is byte-identical to the previous single-event API.
+    """
+    return detect_cascade_multi(df, [event])
 
 
 def compute_kpis(df: pd.DataFrame) -> dict:

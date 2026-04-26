@@ -7,6 +7,7 @@ a vertical shaded band.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -52,12 +53,23 @@ def _row_intervals(row: pd.Series) -> tuple[datetime, datetime] | None:
     return start, end
 
 
-def build_rotation_gantt(df: pd.DataFrame, event: AirportClosureEvent) -> Any:
+def build_rotation_gantt(
+    df: pd.DataFrame,
+    events: AirportClosureEvent | Iterable[AirportClosureEvent],
+) -> Any:
     """Build a Plotly Figure showing each aircraft's rotation.
+
+    ``events`` may be a single event (back-compat) or an iterable. Each
+    event draws its own colour-coded closure band so multi-airport
+    scenarios are visually distinguishable on the same chart.
 
     Returns None if Plotly is not available — callers should handle this
     so the rest of the dashboard still renders.
     """
+    if isinstance(events, AirportClosureEvent):
+        events_list: list[AirportClosureEvent] = [events]
+    else:
+        events_list = list(events)
     try:
         import plotly.express as px
         import plotly.graph_objects as go
@@ -117,16 +129,22 @@ def build_rotation_gantt(df: pd.DataFrame, event: AirportClosureEvent) -> Any:
     fig.update_yaxes(autorange="reversed", title="Aircraft")
     fig.update_xaxes(title="Time")
 
-    closure_start = datetime.combine(event.closure_date, event.start_time)
-    closure_end = datetime.combine(event.closure_date, event.end_time)
-    fig.add_vrect(
-        x0=closure_start,
-        x1=closure_end,
-        fillcolor="rgba(214, 39, 40, 0.12)",
-        line_width=0,
-        annotation_text=f"{event.airport} closed",
-        annotation_position="top left",
-    )
+    for ev in events_list:
+        closure_start = datetime.combine(ev.closure_date, ev.start_time)
+        closure_end = datetime.combine(ev.closure_date, ev.end_time)
+        # Use the event's type colour at low opacity so overlapping events
+        # remain readable.
+        hex_colour = ev.closure_type_colour.lstrip("#")
+        r, g, b = (int(hex_colour[i : i + 2], 16) for i in (0, 2, 4))
+        fillcolor = f"rgba({r}, {g}, {b}, 0.12)"
+        fig.add_vrect(
+            x0=closure_start,
+            x1=closure_end,
+            fillcolor=fillcolor,
+            line_width=0,
+            annotation_text=f"{ev.airport} {ev.closure_type_label.lower()}",
+            annotation_position="top left",
+        )
 
     fig.update_layout(
         height=max(320, 28 * plot_df["aircraft_reg"].nunique() + 80),
