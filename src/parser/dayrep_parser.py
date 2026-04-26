@@ -101,10 +101,16 @@ def _is_valid_flight_row(row: pd.Series) -> bool:
     flt = str(row.get("flight_no", "")).strip()
     date_val = str(row.get("flight_date", "")).strip()
 
-    if not flt or not date_val:
+    if not flt or flt.lower() == "nan":
+        return False
+    if not date_val or date_val.lower() == "nan":
         return False
 
-    # Flight number should match pattern
+    # Flight number must contain at least one digit (distinguishes from footer text)
+    if not re.search(r"\d", flt):
+        return False
+
+    # Flight number should match pattern (airline prefix + digits)
     if not re.match(FLIGHT_NO_PATTERN, flt):
         return False
 
@@ -175,7 +181,10 @@ def parse_dayrep_report(
     # 5. Basic cleanup — convert everything to string for uniform processing
     for col in ["flight_no", "aircraft_reg", "aircraft_type", "origin", "destination"]:
         if col in df_data.columns:
-            df_data[col] = df_data[col].astype(str).str.strip()
+            # Handle numeric values (Excel may store flight_no as float like 1234.0)
+            df_data[col] = df_data[col].apply(
+                lambda v: str(int(v)) if isinstance(v, float) and not pd.isna(v) and v == int(v) else str(v)
+            ).str.strip()
 
     # 6. Normalize aircraft registration
     if "aircraft_reg" in df_data.columns:

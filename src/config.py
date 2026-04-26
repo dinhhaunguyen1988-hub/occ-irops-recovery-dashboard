@@ -19,7 +19,7 @@ MIN_HEADER_MATCH = 6
 NULL_TIME_VALUES = {"", "--:--", "--", "N/A", "NONE", "NULL"}
 
 # Regex patterns for data validation
-FLIGHT_NO_PATTERN = r"^[0-9]{3,4}[A-Z]?$"
+FLIGHT_NO_PATTERN = r"^[A-Z]{0,3}\s*\d{1,5}[A-Z]?$"
 REG_PATTERN = r"^[A-Z]{1,2}-[A-Z0-9]{3,5}$"
 
 # Canonical output column names
