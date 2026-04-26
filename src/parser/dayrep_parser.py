@@ -8,6 +8,7 @@ and returns a clean DataFrame with data quality warnings.
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import date, datetime
 
 import pandas as pd
@@ -19,6 +20,17 @@ from src.config import (
     REG_PATTERN,
 )
 from src.parser.time_parser import parse_time_with_warning
+
+
+def _norm_header(s: object) -> str:
+    """Uppercase + NFC-normalize a header cell so Vietnamese aliases match.
+
+    Some AIMS exports emit decomposed (NFD) Vietnamese text; normalizing to
+    NFC ensures `"NG\u00c0Y"` (single codepoint) matches `"NGA\u0300Y"`
+    (decomposed) byte-for-byte.
+    """
+    return unicodedata.normalize("NFC", str(s).strip().upper())
+
 
 # ---------------------------------------------------------------------------
 # Aircraft registration normalization
@@ -45,6 +57,11 @@ def normalize_reg(raw: object) -> str | None:
     if not s:
         return None
 
+    # Replace internal whitespace and slashes with a single hyphen so that
+    # ``VN A517`` / ``VN/A517`` both normalize to ``VN-A517``.
+    s = re.sub(r"[\s/]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
+
     # Convert VNA500 -> VN-A500
     if re.match(r"^VN[A-Z0-9]{3,5}$", s) and "-" not in s:
         s = "VN-" + s[2:]
@@ -66,7 +83,7 @@ def find_header_row(df_raw: pd.DataFrame) -> int:
     Raises ``ValueError`` if no header row is found.
     """
     for i, row in df_raw.iterrows():
-        row_upper = [str(v).strip().upper() for v in row]
+        row_upper = [_norm_header(v) for v in row]
         matched = sum(
             1
             for aliases in HEADER_KEYWORD_MAP.values()
@@ -80,7 +97,7 @@ def find_header_row(df_raw: pd.DataFrame) -> int:
 
 def _map_column(col_name: str) -> str | None:
     """Map a raw column name to its canonical name using keyword aliases."""
-    col_upper = col_name.strip().upper()
+    col_upper = _norm_header(col_name)
     canonical_map = {
         "DATE": "flight_date",
         "FLT": "flight_no",
