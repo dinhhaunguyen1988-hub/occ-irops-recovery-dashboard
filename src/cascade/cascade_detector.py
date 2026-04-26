@@ -43,7 +43,7 @@ def display_impact_level(level: int | None) -> str:
 
 
 def _impact_reason(level: int | None, is_dest: bool, is_orig: bool) -> str:
-    """Generate a human-readable reason for the impact level."""
+    """Generate a short human-readable reason for the impact level."""
     if level is None:
         return ""
     if level == 1:
@@ -56,6 +56,53 @@ def _impact_reason(level: int | None, is_dest: bool, is_orig: bool) -> str:
     if level == 2:
         return "Downstream aircraft rotation after Level 1 impact"
     return "Extended downstream cascade"
+
+
+def _explain_level1(
+    row: pd.Series,
+    triggered_events: list[AirportClosureEvent],
+    is_dest: bool,
+    is_orig: bool,
+) -> str:
+    """Build a verbose human-readable explanation for a Level 1 flight.
+
+    Mentions which event window the flight intersects, the relevant
+    scheduled time (STA for arrivals, STD for departures), and the closure
+    type label. Used to populate ``impact_explanation`` so DMs can argue the
+    classification with crew/control.
+    """
+    if not triggered_events:
+        return ""
+    parts: list[str] = []
+    for ev in triggered_events:
+        ev_label = ev.closure_type.replace("_", " ")
+        window = f"{ev.start_time.strftime('%H:%M')}\u2013{ev.end_time.strftime('%H:%M')}"
+        date_str = ev.closure_date.isoformat() if ev.closure_date else "n/a"
+        if is_dest and row.get("destination") == ev.airport:
+            sta = row.get("sta")
+            sta_str = sta.strftime("%H:%M") if sta is not None and hasattr(sta, "strftime") else "?"
+            parts.append(
+                f"STA {sta_str} arrives at {ev.airport} during {ev_label} "
+                f"window {window} on {date_str}"
+            )
+        if is_orig and row.get("origin") == ev.airport:
+            std = row.get("std")
+            std_str = std.strftime("%H:%M") if std is not None and hasattr(std, "strftime") else "?"
+            parts.append(
+                f"STD {std_str} departs {ev.airport} during {ev_label} "
+                f"window {window} on {date_str}"
+            )
+    return "; ".join(parts) if parts else ""
+
+
+def _explain_cascade(level: int, root_flight: str | None, depth: int, reg: str) -> str:
+    """Verbose explanation for a Level 2/3+ flight."""
+    if root_flight is None:
+        return ""
+    return (
+        f"Aircraft {reg} is tied to root Level 1 flight {root_flight}; "
+        f"this is hop {depth} in the rotation chain (Level {level})"
+    )
 
 
 def _level1_masks_for_event(
@@ -109,26 +156,39 @@ def detect_cascade_multi(
     # Initialize cascade columns
     df["impact_level_numeric"] = None
     df["impact_reason"] = ""
+    df["impact_explanation"] = ""
     df["cascade_root_flight"] = None
     df["cascade_depth"] = 0
 
     # --- Pass 1: union of per-event Level-1 masks ---
     dest_union = pd.Series(False, index=df.index)
     orig_union = pd.Series(False, index=df.index)
+    per_event_dest: list[pd.Series] = []
+    per_event_orig: list[pd.Series] = []
     for event in events_list:
         dest_e, orig_e = _level1_masks_for_event(df, event)
+        per_event_dest.append(dest_e)
+        per_event_orig.append(orig_e)
         dest_union = dest_union | dest_e
         orig_union = orig_union | orig_e
 
     level1_mask = dest_union | orig_union
     df.loc[level1_mask, "impact_level_numeric"] = 1
 
-    # Set reasons for Level 1 (combined across events)
+    # Set reasons + verbose explanation for Level 1 (combined across events)
     for idx in df[level1_mask].index:
         is_dest = bool(dest_union.at[idx])
         is_orig = bool(orig_union.at[idx])
         df.at[idx, "impact_reason"] = _impact_reason(1, is_dest, is_orig)
         df.at[idx, "cascade_root_flight"] = df.at[idx, "flight_no"]
+        triggered_events = [
+            ev
+            for ev, dest_e, orig_e in zip(events_list, per_event_dest, per_event_orig, strict=True)
+            if bool(dest_e.at[idx]) or bool(orig_e.at[idx])
+        ]
+        df.at[idx, "impact_explanation"] = _explain_level1(
+            df.loc[idx], triggered_events, is_dest, is_orig
+        )
 
     # --- Pass 2: trace downstream cascade by aircraft registration ---
     # Sort within each aircraft group by (flight_date, std) so cascade
@@ -160,6 +220,9 @@ def detect_cascade_multi(
                         df.at[idx, "impact_level_numeric"] = cascade_level
                         df.at[idx, "impact_reason"] = _impact_reason(cascade_level, False, False)
                         df.at[idx, "cascade_root_flight"] = root_flight
+                        df.at[idx, "impact_explanation"] = _explain_cascade(
+                            cascade_level, root_flight, depth + 1, str(reg)
+                        )
                     depth += 1
                     if root_idx is not None:
                         df.at[root_idx, "cascade_depth"] = depth

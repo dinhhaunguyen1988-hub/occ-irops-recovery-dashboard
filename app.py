@@ -22,6 +22,11 @@ from src.impact import estimate_pax_and_cost
 from src.logging_config import get_logger, setup_logging
 from src.models.event import CLOSURE_TYPES, AirportClosureEvent
 from src.parser.multi_file import parse_multiple_dayrep_reports
+from src.validation import (
+    PREDICTED_LABELS,
+    parse_actuals_csv,
+    validate_against_actuals,
+)
 from src.visualization.gantt import build_rotation_gantt
 from src.visualization.map_view import build_airport_map
 
@@ -423,6 +428,7 @@ else:
         "est_pax",
         "est_cost_usd",
         "impact_reason",
+        "impact_explanation",
         "data_quality_warning",
     ]
     existing_cols = [c for c in display_cols if c in affected_ranked.columns]
@@ -461,6 +467,7 @@ if affected_aircraft:
                 "sta",
                 "impact_level_display",
                 "impact_reason",
+                "impact_explanation",
             ]
             existing_rot_cols = [c for c in rotation_cols if c in ac_flights.columns]
             ac_display = ac_flights[existing_rot_cols].copy()
@@ -498,3 +505,56 @@ with exp_col2:
             file_name=f"IROPS_Briefing_{events[0].airport}_{events[0].closure_date}.pdf",
             mime="application/pdf",
         )
+
+# ─── Validation vs actuals (pilot readiness) ─────────────────────────────
+st.subheader("Validation vs Actuals")
+st.caption(
+    "Upload an `actuals.csv` with columns `flight_no, actual_outcome` "
+    "(`on_time | delayed | cancelled | diverted`) to compare predictions "
+    "against what actually happened. Optional `flight_date` column for multi-day runs."
+)
+actuals_file = st.file_uploader(
+    "Actuals CSV",
+    type=["csv"],
+    key="actuals_uploader",
+)
+if actuals_file is not None:
+    try:
+        actuals_df = parse_actuals_csv(actuals_file)
+    except (ValueError, pd.errors.ParserError) as exc:
+        st.error(f"Could not parse actuals CSV: {exc}")
+    else:
+        result = validate_against_actuals(df_result, actuals_df)
+        cov = result["coverage"].set_index("metric")["count"].to_dict()
+        st.caption(
+            f"Coverage: {cov.get('matched', 0)} / {cov.get('predictions', 0)} "
+            f"flights matched ({cov.get('unmatched', 0)} unmatched)."
+        )
+        confusion = result["confusion"]
+        if confusion.empty:
+            st.info("No matched rows — cannot compute confusion matrix.")
+        else:
+            confusion_pivot = (
+                confusion.pivot(
+                    index="predicted_label",
+                    columns="actual_outcome",
+                    values="count",
+                )
+                .fillna(0)
+                .astype(int)
+            )
+            confusion_pivot = confusion_pivot.reindex(
+                index=[lbl for lbl in PREDICTED_LABELS if lbl in confusion_pivot.index]
+            )
+            st.markdown("**Confusion matrix** (rows = predicted, columns = actual)")
+            st.dataframe(confusion_pivot, use_container_width=True)
+            st.markdown("**Per-level metrics**")
+            st.dataframe(result["metrics"], use_container_width=True, hide_index=True)
+            logger.info(
+                "validation_completed",
+                extra={
+                    "file_hashes": file_hashes,
+                    "matched": cov.get("matched", 0),
+                    "unmatched": cov.get("unmatched", 0),
+                },
+            )
