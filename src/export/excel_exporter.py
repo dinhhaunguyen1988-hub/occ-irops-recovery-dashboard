@@ -75,6 +75,7 @@ def export_to_excel(
             "sta",
             "impact_level_display",
             "impact_reason",
+            "impact_explanation",
             "cascade_root_flight",
             "data_quality_warning",
         ]

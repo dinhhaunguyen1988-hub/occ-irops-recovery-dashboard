@@ -1,0 +1,26 @@
+# Example users config for OCC IROPS Recovery Dashboard (Sprint 5 auth).
+#
+# Copy this file to ``config/users.yaml`` (gitignored) and replace the
+# placeholders. Generate bcrypt password hashes with:
+#
+#   python -c "import streamlit_authenticator as stauth; print(stauth.Hasher(['plain-password']).generate()[0])"
+#
+# Roles:
+#   dm      Duty manager: full access (run analysis, edit settings, view audit log).
+#   viewer  Read-only access (no settings edit, no audit log).
+
+cookie:
+  name: occ_irops_auth
+  key: REPLACE_WITH_RANDOM_64_CHAR_HEX_STRING
+  expiry_days: 1
+
+credentials:
+  usernames:
+    dm1:
+      name: Dinh Hau Nguyen
+      password: $2b$12$REPLACE_WITH_BCRYPT_HASH_OF_REAL_PASSWORD_FOR_DM
+      role: dm
+    viewer1:
+      name: Read-only Viewer
+      password: $2b$12$REPLACE_WITH_BCRYPT_HASH_OF_REAL_PASSWORD_FOR_VIEWER
+      role: viewer

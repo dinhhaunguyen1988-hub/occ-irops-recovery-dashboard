@@ -55,3 +55,6 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+markers = [
+    "performance: marks long-running performance smoke tests (deselect with -m 'not performance')",
+]

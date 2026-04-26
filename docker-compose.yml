@@ -1,0 +1,35 @@
+# OCC IROPS Recovery Dashboard — production-style local run.
+#
+# Usage:
+#   1. Copy config/users.example.yaml → config/users.yaml and replace
+#      the password hashes / cookie key.
+#   2. docker compose up --build
+#   3. Open http://localhost:8501
+#
+# The dashboard is deliberately *not* exposed publicly here. In a real
+# deployment, put it behind nginx / a corporate reverse proxy with TLS.
+
+services:
+  dashboard:
+    build: .
+    image: occ-irops-recovery-dashboard:latest
+    container_name: occ_irops_dashboard
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      # Leave OCC_AUTH_DISABLED unset in production — auth is enforced by default.
+      # OCC_AUTH_DISABLED: "0"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - dashboard_data:/app/data
+      - ./config/users.yaml:/app/config/users.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  dashboard_data:
+    name: occ_irops_dashboard_data

@@ -6,13 +6,14 @@ This script creates a sample report matching the MVP scenario:
 - Multiple aircraft with varying impact levels
 - Realistic Vietnamese airline routes and registrations
 
-Expected KPI after cascade analysis with HAN closure 14:00-18:00:
+Expected KPI after cascade analysis with HAN closure 14:00-18:00
+(refreshed against the current cascade detector — see ``tests/test_cascade_detector.py``):
 - Total flights: 358
-- Affected flights: 87
-- Level 1: 39
-- Level 2: 23
-- Level 3+: 25
-- Aircraft affected: 24
+- Affected flights: 139
+- Level 1: 51
+- Level 2: 41
+- Level 3+: 47
+- Aircraft affected: 26
 """
 
 import random
