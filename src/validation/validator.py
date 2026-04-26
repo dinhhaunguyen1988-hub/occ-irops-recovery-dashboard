@@ -79,11 +79,17 @@ def parse_actuals_csv(file_or_text: str | StringIO) -> pd.DataFrame:
     df.columns = [str(c).strip().lower() for c in df.columns]
     if "flight_no" not in df.columns or "actual_outcome" not in df.columns:
         raise ValueError("actuals CSV must contain 'flight_no' and 'actual_outcome' columns")
+    # Drop rows where either required cell is missing *before* stringifying, so
+    # NaN does not silently become the literal string ``"NAN"``.
+    df = df.dropna(subset=["flight_no", "actual_outcome"])
     df["flight_no"] = df["flight_no"].astype(str).str.strip().str.upper()
     df["actual_outcome"] = df["actual_outcome"].astype(str).str.strip().str.lower()
-    df = df.dropna(subset=["flight_no", "actual_outcome"])
     df = df[df["flight_no"] != ""]
     df = df[df["actual_outcome"] != ""]
+    # Defensive: post-stringification ``"nan"`` / ``"none"`` markers can still
+    # appear if the source CSV uses them as literals. Treat them as missing.
+    df = df[~df["flight_no"].str.lower().isin({"nan", "none"})]
+    df = df[~df["actual_outcome"].isin({"nan", "none"})]
     return df.reset_index(drop=True)
 
 
