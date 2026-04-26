@@ -2,8 +2,6 @@
 
 from datetime import time
 
-import pytest
-
 from src.parser.time_parser import parse_time_field, parse_time_with_warning
 
 

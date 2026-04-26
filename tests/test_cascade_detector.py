@@ -5,7 +5,7 @@ from datetime import date, time
 import pandas as pd
 import pytest
 
-from src.cascade.cascade_detector import detect_cascade, display_impact_level, compute_kpis
+from src.cascade.cascade_detector import compute_kpis, detect_cascade, display_impact_level
 from src.models.event import AirportClosureEvent
 
 
@@ -47,56 +47,98 @@ class TestDisplayImpactLevel:
 
 class TestBoundaryConditions:
     def test_arrival_before_closure(self, han_closure):
-        df = _make_flight_df([{
-            "flight_no": "A", "aircraft_reg": "VN-A100",
-            "origin": "DAD", "destination": "HAN",
-            "std": time(11, 0), "sta": time(13, 59),
-        }])
+        df = _make_flight_df(
+            [
+                {
+                    "flight_no": "A",
+                    "aircraft_reg": "VN-A100",
+                    "origin": "DAD",
+                    "destination": "HAN",
+                    "std": time(11, 0),
+                    "sta": time(13, 59),
+                }
+            ]
+        )
         result = detect_cascade(df, han_closure)
         assert result.iloc[0]["impact_level_numeric"] is None
 
     def test_arrival_at_closure_start_inclusive(self, han_closure):
-        df = _make_flight_df([{
-            "flight_no": "B", "aircraft_reg": "VN-A100",
-            "origin": "DAD", "destination": "HAN",
-            "std": time(12, 40), "sta": time(14, 0),
-        }])
+        df = _make_flight_df(
+            [
+                {
+                    "flight_no": "B",
+                    "aircraft_reg": "VN-A100",
+                    "origin": "DAD",
+                    "destination": "HAN",
+                    "std": time(12, 40),
+                    "sta": time(14, 0),
+                }
+            ]
+        )
         result = detect_cascade(df, han_closure)
         assert result.iloc[0]["impact_level_numeric"] == 1
 
     def test_arrival_within_closure(self, han_closure):
-        df = _make_flight_df([{
-            "flight_no": "C", "aircraft_reg": "VN-A100",
-            "origin": "DAD", "destination": "HAN",
-            "std": time(12, 40), "sta": time(17, 59),
-        }])
+        df = _make_flight_df(
+            [
+                {
+                    "flight_no": "C",
+                    "aircraft_reg": "VN-A100",
+                    "origin": "DAD",
+                    "destination": "HAN",
+                    "std": time(12, 40),
+                    "sta": time(17, 59),
+                }
+            ]
+        )
         result = detect_cascade(df, han_closure)
         assert result.iloc[0]["impact_level_numeric"] == 1
 
     def test_arrival_at_closure_end_exclusive(self, han_closure):
-        df = _make_flight_df([{
-            "flight_no": "D", "aircraft_reg": "VN-A100",
-            "origin": "DAD", "destination": "HAN",
-            "std": time(12, 40), "sta": time(18, 0),
-        }])
+        df = _make_flight_df(
+            [
+                {
+                    "flight_no": "D",
+                    "aircraft_reg": "VN-A100",
+                    "origin": "DAD",
+                    "destination": "HAN",
+                    "std": time(12, 40),
+                    "sta": time(18, 0),
+                }
+            ]
+        )
         result = detect_cascade(df, han_closure)
         assert result.iloc[0]["impact_level_numeric"] is None
 
     def test_departure_from_closed_airport(self, han_closure):
-        df = _make_flight_df([{
-            "flight_no": "E", "aircraft_reg": "VN-A100",
-            "origin": "HAN", "destination": "DAD",
-            "std": time(14, 35), "sta": time(15, 55),
-        }])
+        df = _make_flight_df(
+            [
+                {
+                    "flight_no": "E",
+                    "aircraft_reg": "VN-A100",
+                    "origin": "HAN",
+                    "destination": "DAD",
+                    "std": time(14, 35),
+                    "sta": time(15, 55),
+                }
+            ]
+        )
         result = detect_cascade(df, han_closure)
         assert result.iloc[0]["impact_level_numeric"] == 1
 
     def test_departure_at_closure_end_not_affected(self, han_closure):
-        df = _make_flight_df([{
-            "flight_no": "F", "aircraft_reg": "VN-A100",
-            "origin": "HAN", "destination": "DAD",
-            "std": time(18, 0), "sta": time(19, 20),
-        }])
+        df = _make_flight_df(
+            [
+                {
+                    "flight_no": "F",
+                    "aircraft_reg": "VN-A100",
+                    "origin": "HAN",
+                    "destination": "DAD",
+                    "std": time(18, 0),
+                    "sta": time(19, 20),
+                }
+            ]
+        )
         result = detect_cascade(df, han_closure)
         assert result.iloc[0]["impact_level_numeric"] is None
 
@@ -110,18 +152,38 @@ class TestMultipleLevel1SameAircraft:
         1801: SGN->BLR dep 19:20 => Level 3+ (extended downstream)
         """
         flights = [
-            {"flight_no": "1504", "aircraft_reg": "VN-A500",
-             "origin": "DAD", "destination": "HAN",
-             "std": time(12, 40), "sta": time(14, 0)},
-            {"flight_no": "1505", "aircraft_reg": "VN-A500",
-             "origin": "HAN", "destination": "DAD",
-             "std": time(14, 35), "sta": time(15, 55)},
-            {"flight_no": "637", "aircraft_reg": "VN-A500",
-             "origin": "DAD", "destination": "SGN",
-             "std": time(16, 40), "sta": time(18, 0)},
-            {"flight_no": "1801", "aircraft_reg": "VN-A500",
-             "origin": "SGN", "destination": "BLR",
-             "std": time(19, 20), "sta": time(22, 35)},
+            {
+                "flight_no": "1504",
+                "aircraft_reg": "VN-A500",
+                "origin": "DAD",
+                "destination": "HAN",
+                "std": time(12, 40),
+                "sta": time(14, 0),
+            },
+            {
+                "flight_no": "1505",
+                "aircraft_reg": "VN-A500",
+                "origin": "HAN",
+                "destination": "DAD",
+                "std": time(14, 35),
+                "sta": time(15, 55),
+            },
+            {
+                "flight_no": "637",
+                "aircraft_reg": "VN-A500",
+                "origin": "DAD",
+                "destination": "SGN",
+                "std": time(16, 40),
+                "sta": time(18, 0),
+            },
+            {
+                "flight_no": "1801",
+                "aircraft_reg": "VN-A500",
+                "origin": "SGN",
+                "destination": "BLR",
+                "std": time(19, 20),
+                "sta": time(22, 35),
+            },
         ]
         df = _make_flight_df(flights)
         result = detect_cascade(df, han_closure)
@@ -140,12 +202,22 @@ class TestMultipleLevel1SameAircraft:
 class TestNonAffectedAircraft:
     def test_unrelated_aircraft(self, han_closure):
         flights = [
-            {"flight_no": "100", "aircraft_reg": "VN-B200",
-             "origin": "SGN", "destination": "DAD",
-             "std": time(8, 0), "sta": time(9, 30)},
-            {"flight_no": "101", "aircraft_reg": "VN-B200",
-             "origin": "DAD", "destination": "SGN",
-             "std": time(10, 0), "sta": time(11, 30)},
+            {
+                "flight_no": "100",
+                "aircraft_reg": "VN-B200",
+                "origin": "SGN",
+                "destination": "DAD",
+                "std": time(8, 0),
+                "sta": time(9, 30),
+            },
+            {
+                "flight_no": "101",
+                "aircraft_reg": "VN-B200",
+                "origin": "DAD",
+                "destination": "SGN",
+                "std": time(10, 0),
+                "sta": time(11, 30),
+            },
         ]
         df = _make_flight_df(flights)
         result = detect_cascade(df, han_closure)
@@ -156,31 +228,55 @@ class TestNonAffectedAircraft:
 
 class TestAuditReasons:
     def test_arrival_reason(self, han_closure):
-        df = _make_flight_df([{
-            "flight_no": "1504", "aircraft_reg": "VN-A500",
-            "origin": "DAD", "destination": "HAN",
-            "std": time(12, 40), "sta": time(14, 0),
-        }])
+        df = _make_flight_df(
+            [
+                {
+                    "flight_no": "1504",
+                    "aircraft_reg": "VN-A500",
+                    "origin": "DAD",
+                    "destination": "HAN",
+                    "std": time(12, 40),
+                    "sta": time(14, 0),
+                }
+            ]
+        )
         result = detect_cascade(df, han_closure)
         assert "Arrival into closed airport" in result.iloc[0]["impact_reason"]
 
     def test_departure_reason(self, han_closure):
-        df = _make_flight_df([{
-            "flight_no": "1505", "aircraft_reg": "VN-A500",
-            "origin": "HAN", "destination": "DAD",
-            "std": time(14, 35), "sta": time(15, 55),
-        }])
+        df = _make_flight_df(
+            [
+                {
+                    "flight_no": "1505",
+                    "aircraft_reg": "VN-A500",
+                    "origin": "HAN",
+                    "destination": "DAD",
+                    "std": time(14, 35),
+                    "sta": time(15, 55),
+                }
+            ]
+        )
         result = detect_cascade(df, han_closure)
         assert "Departure from closed airport" in result.iloc[0]["impact_reason"]
 
     def test_downstream_reason(self, han_closure):
         flights = [
-            {"flight_no": "1504", "aircraft_reg": "VN-A500",
-             "origin": "DAD", "destination": "HAN",
-             "std": time(12, 40), "sta": time(14, 0)},
-            {"flight_no": "637", "aircraft_reg": "VN-A500",
-             "origin": "DAD", "destination": "SGN",
-             "std": time(16, 40), "sta": time(18, 0)},
+            {
+                "flight_no": "1504",
+                "aircraft_reg": "VN-A500",
+                "origin": "DAD",
+                "destination": "HAN",
+                "std": time(12, 40),
+                "sta": time(14, 0),
+            },
+            {
+                "flight_no": "637",
+                "aircraft_reg": "VN-A500",
+                "origin": "DAD",
+                "destination": "SGN",
+                "std": time(16, 40),
+                "sta": time(18, 0),
+            },
         ]
         df = _make_flight_df(flights)
         result = detect_cascade(df, han_closure)
@@ -190,21 +286,46 @@ class TestAuditReasons:
 class TestComputeKpis:
     def test_kpi_counts(self, han_closure):
         flights = [
-            {"flight_no": "1504", "aircraft_reg": "VN-A500",
-             "origin": "DAD", "destination": "HAN",
-             "std": time(12, 40), "sta": time(14, 0)},
-            {"flight_no": "1505", "aircraft_reg": "VN-A500",
-             "origin": "HAN", "destination": "DAD",
-             "std": time(14, 35), "sta": time(15, 55)},
-            {"flight_no": "637", "aircraft_reg": "VN-A500",
-             "origin": "DAD", "destination": "SGN",
-             "std": time(16, 40), "sta": time(18, 0)},
-            {"flight_no": "1801", "aircraft_reg": "VN-A500",
-             "origin": "SGN", "destination": "BLR",
-             "std": time(19, 20), "sta": time(22, 35)},
-            {"flight_no": "100", "aircraft_reg": "VN-B200",
-             "origin": "SGN", "destination": "DAD",
-             "std": time(8, 0), "sta": time(9, 30)},
+            {
+                "flight_no": "1504",
+                "aircraft_reg": "VN-A500",
+                "origin": "DAD",
+                "destination": "HAN",
+                "std": time(12, 40),
+                "sta": time(14, 0),
+            },
+            {
+                "flight_no": "1505",
+                "aircraft_reg": "VN-A500",
+                "origin": "HAN",
+                "destination": "DAD",
+                "std": time(14, 35),
+                "sta": time(15, 55),
+            },
+            {
+                "flight_no": "637",
+                "aircraft_reg": "VN-A500",
+                "origin": "DAD",
+                "destination": "SGN",
+                "std": time(16, 40),
+                "sta": time(18, 0),
+            },
+            {
+                "flight_no": "1801",
+                "aircraft_reg": "VN-A500",
+                "origin": "SGN",
+                "destination": "BLR",
+                "std": time(19, 20),
+                "sta": time(22, 35),
+            },
+            {
+                "flight_no": "100",
+                "aircraft_reg": "VN-B200",
+                "origin": "SGN",
+                "destination": "DAD",
+                "std": time(8, 0),
+                "sta": time(9, 30),
+            },
         ]
         df = _make_flight_df(flights)
         result = detect_cascade(df, han_closure)

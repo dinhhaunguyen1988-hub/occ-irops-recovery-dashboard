@@ -10,14 +10,14 @@ Boundary rule: start inclusive, end exclusive.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any
 
 import pandas as pd
 
 from src.models.event import AirportClosureEvent
 
 
-def display_impact_level(level: Optional[int]) -> str:
+def display_impact_level(level: int | None) -> str:
     """Convert numeric impact level to display string.
 
     1  -> "Level 1"
@@ -34,7 +34,7 @@ def display_impact_level(level: Optional[int]) -> str:
     return "3+"
 
 
-def _impact_reason(level: Optional[int], is_dest: bool, is_orig: bool) -> str:
+def _impact_reason(level: int | None, is_dest: bool, is_orig: bool) -> str:
     """Generate a human-readable reason for the impact level."""
     if level is None:
         return ""
@@ -110,13 +110,17 @@ def detect_cascade(
 
     # --- Pass 2: Trace downstream by aircraft registration ---
     if "aircraft_reg" in df.columns and "std" in df.columns:
-        for reg, group in df.groupby("aircraft_reg"):
-            if reg is None:
-                continue
+        for reg_key, group in df.groupby("aircraft_reg", dropna=False):
+            reg: Any = reg_key
+            try:
+                if reg is None or pd.isna(reg):
+                    continue
+            except (TypeError, ValueError):
+                pass
 
             sorted_group = group.sort_values("std", na_position="last")
-            cascade_level: Optional[int] = None
-            root_flight: Optional[str] = None
+            cascade_level: int | None = None
+            root_flight: str | None = None
 
             for idx, row in sorted_group.iterrows():
                 if row["impact_level_numeric"] == 1:
@@ -150,7 +154,9 @@ def compute_kpis(df: pd.DataFrame) -> dict:
     level_2 = affected[affected["impact_level_numeric"] == 2]
     level_3plus = affected[affected["impact_level_numeric"] >= 3]
 
-    aircraft_affected = affected["aircraft_reg"].nunique() if "aircraft_reg" in affected.columns else 0
+    aircraft_affected = (
+        affected["aircraft_reg"].nunique() if "aircraft_reg" in affected.columns else 0
+    )
 
     return {
         "total_flights": len(df),

@@ -1,0 +1,57 @@
+[project]
+name = "occ-irops-recovery-dashboard"
+version = "0.1.0"
+description = "Automated AIMS DayRepReport reader for OCC IROPS impact analysis"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "data",
+    "memory-bank",
+    "docs",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+"app.py" = ["E402"]  # streamlit script-style ordering
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.mypy]
+python_version = "3.10"
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+ignore_missing_imports = true
+exclude = [
+    "data/",
+    "memory-bank/",
+    "docs/",
+    "tests/",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
