@@ -77,8 +77,15 @@ def detect_cascade(
     df["impact_level_numeric"] = None
     df["impact_reason"] = ""
     df["cascade_root_flight"] = None
+    df["cascade_depth"] = 0
 
     # --- Pass 1: Detect all Level 1 flights ---
+    # Filter by closure_date when flight_date is present so multi-day data
+    # only triggers Level 1 on the actual closure day.
+    on_closure_date = pd.Series(True, index=df.index)
+    if "flight_date" in df.columns:
+        on_closure_date = df["flight_date"] == event.closure_date
+
     dest_affected = pd.Series(False, index=df.index)
     orig_affected = pd.Series(False, index=df.index)
 
@@ -88,6 +95,7 @@ def detect_cascade(
             & (df["sta"].notna())
             & (df["sta"] >= event.start_time)
             & (df["sta"] < event.end_time)
+            & on_closure_date
         )
 
     if "origin" in df.columns and "std" in df.columns:
@@ -96,6 +104,7 @@ def detect_cascade(
             & (df["std"].notna())
             & (df["std"] >= event.start_time)
             & (df["std"] < event.end_time)
+            & on_closure_date
         )
 
     level1_mask = dest_affected | orig_affected
@@ -109,7 +118,10 @@ def detect_cascade(
         df.at[idx, "cascade_root_flight"] = df.at[idx, "flight_no"]
 
     # --- Pass 2: Trace downstream by aircraft registration ---
-    if "aircraft_reg" in df.columns and "std" in df.columns:
+    # Sort within each aircraft group by (flight_date, std) so cascade
+    # propagates correctly across overnight rotations.
+    sort_keys = [k for k in ("flight_date", "std") if k in df.columns]
+    if "aircraft_reg" in df.columns and sort_keys:
         for reg_key, group in df.groupby("aircraft_reg", dropna=False):
             reg: Any = reg_key
             try:
@@ -118,19 +130,26 @@ def detect_cascade(
             except (TypeError, ValueError):
                 pass
 
-            sorted_group = group.sort_values("std", na_position="last")
+            sorted_group = group.sort_values(sort_keys, na_position="last")
             cascade_level: int | None = None
             root_flight: str | None = None
+            root_idx: Any = None
+            depth: int = 0
 
             for idx, row in sorted_group.iterrows():
                 if row["impact_level_numeric"] == 1:
                     cascade_level = 2
                     root_flight = row["flight_no"]
+                    root_idx = idx
+                    depth = 0
                 elif cascade_level is not None:
                     if row["impact_level_numeric"] is None:
                         df.at[idx, "impact_level_numeric"] = cascade_level
                         df.at[idx, "impact_reason"] = _impact_reason(cascade_level, False, False)
                         df.at[idx, "cascade_root_flight"] = root_flight
+                    depth += 1
+                    if root_idx is not None:
+                        df.at[root_idx, "cascade_depth"] = depth
                     cascade_level += 1
 
     # --- Generate display level ---
