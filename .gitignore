@@ -8,3 +8,10 @@ build/
 data/real_validation/
 data/real_validation/*.xlsx
 data/real_validation/*.xls
+
+# Sprint 5 production deploy
+config/users.yaml
+data/runs.db
+data/runs.db-journal
+data/runs.db-wal
+data/runs.db-shm

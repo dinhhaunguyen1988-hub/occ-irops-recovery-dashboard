@@ -13,6 +13,7 @@ from datetime import date, time
 import pandas as pd
 import streamlit as st
 
+from src.auth import is_auth_disabled, require_login, role_can_edit_settings, role_can_view_audit
 from src.cascade.cascade_detector import compute_kpis, detect_cascade_multi
 from src.cascade.ranking import compute_priority
 from src.config import MVP_LIMITATION_WARNING
@@ -22,6 +23,17 @@ from src.impact import estimate_pax_and_cost
 from src.logging_config import get_logger, setup_logging
 from src.models.event import CLOSURE_TYPES, AirportClosureEvent
 from src.parser.multi_file import parse_multiple_dayrep_reports
+from src.persistence import (
+    get_connection,
+    get_settings,
+    init_db,
+    list_audit_events,
+    list_recent_runs,
+    record_audit_event,
+    record_run,
+    update_settings,
+)
+from src.persistence.settings import settings_to_estimator_kwargs
 from src.validation import (
     PREDICTED_LABELS,
     parse_actuals_csv,
@@ -34,6 +46,20 @@ setup_logging()
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="OCC IROPS Recovery Dashboard", layout="wide")
+
+# ─── Auth gate ─────────────────────────────────────────────────────────
+user = require_login()
+if user is None:
+    st.stop()
+if is_auth_disabled():
+    st.sidebar.warning("Auth disabled (OCC_AUTH_DISABLED=1) — local dev mode.")
+st.sidebar.success(f"Signed in as **{user.name}** ({user.role})")
+
+# ─── Persistence bootstrap ─────────────────────────────────────────────
+db_conn = get_connection()
+init_db(db_conn)
+settings_blob = get_settings(db_conn)
+estimator_kwargs = settings_to_estimator_kwargs(settings_blob)
 
 # ─── Sidebar ────────────────────────────────────────────────────────────
 st.sidebar.title("OCC IROPS Recovery Dashboard")
@@ -188,7 +214,7 @@ if df.empty:
 with st.spinner("Running cascade detection..."):
     df_result = detect_cascade_multi(df, events)
     df_result = compute_priority(df_result)
-    df_result = estimate_pax_and_cost(df_result)
+    df_result = estimate_pax_and_cost(df_result, **estimator_kwargs)  # type: ignore[arg-type]
     kpis = compute_kpis(df_result)
 
 affected = df_result[df_result["impact_level_numeric"].notna()].copy()
@@ -205,6 +231,34 @@ logger.info(
         **{f"kpi_{k}": v for k, v in kpis.items() if isinstance(v, (int, float))},
     },
 )
+
+# Persist this run + audit event so DMs can review history later.
+try:
+    closure_config_payload = [
+        {
+            "airport": e.airport,
+            "closure_date": str(e.closure_date),
+            "start_time": e.start_time.strftime("%H:%M"),
+            "end_time": e.end_time.strftime("%H:%M"),
+            "closure_type": e.closure_type,
+        }
+        for e in events
+    ]
+    run_id = record_run(
+        db_conn,
+        user=user.username,
+        file_hashes=file_hashes,
+        closure_config=closure_config_payload,
+        kpi_snapshot={k: v for k, v in kpis.items() if isinstance(v, (int, float))},
+    )
+    record_audit_event(
+        db_conn,
+        user=user.username,
+        action="run_analysis",
+        payload={"run_id": run_id, "events": closure_config_payload},
+    )
+except Exception as exc:  # noqa: BLE001 — never crash UI on persistence error
+    logger.warning("persistence_failed", extra={"error": str(exc)})
 
 # ─── What-if comparison ────────────────────────────────────────────────
 whatif_diff: dict[str, set[str]] = {}
@@ -557,4 +611,102 @@ if actuals_file is not None:
                     "matched": cov.get("matched", 0),
                     "unmatched": cov.get("unmatched", 0),
                 },
+            )
+
+# ─── Recent runs (history) ─────────────────────────────────────────────
+with st.expander("Recent runs (history)", expanded=False):
+    runs = list_recent_runs(db_conn, limit=10)
+    if not runs:
+        st.info("No prior runs recorded yet.")
+    else:
+        runs_df = pd.DataFrame(
+            [
+                {
+                    "id": r["id"],
+                    "user": r["user"],
+                    "created_at": r["created_at"],
+                    "events": ", ".join(
+                        f"{e['airport']} {e['start_time']}-{e['end_time']} ({e['closure_date']})"
+                        for e in r["closure_config"]
+                    ),
+                    "affected": r["kpi_snapshot"].get("affected_flights"),
+                    "L1": r["kpi_snapshot"].get("level_1_count"),
+                    "L2": r["kpi_snapshot"].get("level_2_count"),
+                    "L3+": r["kpi_snapshot"].get("level_3plus_count"),
+                    "pax": r["kpi_snapshot"].get("total_pax_disrupted"),
+                    "cost_usd": r["kpi_snapshot"].get("total_cost_usd"),
+                }
+                for r in runs
+            ]
+        )
+        st.dataframe(runs_df, use_container_width=True, hide_index=True)
+
+# ─── Settings (DM-only) ────────────────────────────────────────────────
+if role_can_edit_settings(user.role):
+    with st.expander("Settings (DM-only)", expanded=False):
+        st.caption(
+            "Tunable assumptions for pax / cost estimation. Changes apply to the next "
+            "Run Analysis click and are persisted to the local SQLite database."
+        )
+        new_load_factor = st.slider(
+            "Load factor",
+            min_value=0.5,
+            max_value=1.0,
+            value=float(settings_blob["load_factor"]),
+            step=0.01,
+        )
+        new_cost = st.number_input(
+            "Cost per pax per minute (USD)",
+            min_value=0.0,
+            max_value=5.0,
+            value=float(settings_blob["cost_per_pax_per_minute"]),
+            step=0.05,
+        )
+        st.markdown("**Aircraft seat capacity**")
+        cap_df = pd.DataFrame(
+            sorted(settings_blob["seat_capacity"].items()),
+            columns=["aircraft_type", "seat_capacity"],
+        )
+        edited_cap = st.data_editor(
+            cap_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="capacity_editor",
+        )
+        if st.button("Save settings", type="primary"):
+            new_capacity = {
+                str(row["aircraft_type"]).strip().upper(): int(row["seat_capacity"])
+                for _, row in edited_cap.iterrows()
+                if pd.notna(row["aircraft_type"]) and pd.notna(row["seat_capacity"])
+            }
+            new_blob = {
+                "load_factor": new_load_factor,
+                "cost_per_pax_per_minute": new_cost,
+                "seat_capacity": new_capacity,
+                "level_delay_minutes": settings_blob["level_delay_minutes"],
+            }
+            update_settings(db_conn, new_blob, updated_by=user.username)  # type: ignore[arg-type]
+            record_audit_event(
+                db_conn,
+                user=user.username,
+                action="settings_updated",
+                payload={"load_factor": new_load_factor, "cost": new_cost},
+            )
+            st.success("Settings saved. Click **Run Analysis** to re-compute with the new values.")
+
+# ─── Audit log (DM-only) ───────────────────────────────────────────────
+if role_can_view_audit(user.role):
+    with st.expander("Audit log (DM-only)", expanded=False):
+        events_log = list_audit_events(db_conn, limit=200)
+        if not events_log:
+            st.info("No audit events yet.")
+        else:
+            audit_df = pd.DataFrame(events_log)
+            st.dataframe(audit_df, use_container_width=True, hide_index=True)
+            csv_buf = audit_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Download audit log (CSV)",
+                data=csv_buf,
+                file_name="audit_log.csv",
+                mime="text/csv",
             )
