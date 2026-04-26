@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase:** MVP Development Complete — Ready for Phase 0 Validation
+**Phase:** MVP Tested & Deployed — Ready for Phase 0 Validation
 
 ## What Has Been Built
 
@@ -18,7 +18,25 @@
 | Excel Exporter | `src/export/excel_exporter.py` | Complete — 5 sheets (Params, KPI, Affected, All, Warnings) |
 | Event Model | `src/models/event.py` | Complete — AirportClosureEvent dataclass |
 | Config | `src/config.py` | Complete — constants, patterns, keyword maps |
-| Streamlit UI | `app.py` | Complete — sidebar input, KPI cards, tables, rotation view, export |
+| Streamlit UI | `app.py` | Complete — sidebar input, KPI cards, charts, tables, rotation view, export |
+
+### Infrastructure
+
+| Component | File | Status |
+|---|---|---|
+| CI/CD | `.github/workflows/ci.yml` | Complete — pytest on Python 3.10/3.11/3.12 |
+| Docker | `Dockerfile` + `.dockerignore` | Complete — production-ready container |
+
+### E2E Test Results (26/04/2026)
+
+| Test | Result |
+|---|---|
+| Initial state (title, sidebar defaults) | Passed |
+| KPIs (358/139/51/41/47/26) | Passed |
+| Data Quality Warnings (4 warnings) | Passed |
+| Affected Flights table (L1/L2/3+) | Passed |
+| Aircraft Rotation cascade chain | Passed |
+| Excel export (5 sheets) | Passed |
 
 ### Test Suite
 

@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+.git
+.github
+.pytest_cache
+memory-bank
+tests
+docs
+data/real_validation
+*.md
+!README.md

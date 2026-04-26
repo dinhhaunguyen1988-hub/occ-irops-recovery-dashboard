@@ -32,9 +32,15 @@
 - [x] User can enter airport closure event
 - [x] Tool displays summary KPI
 - [x] Tool displays affected flight table
+- [x] Tool displays impact analysis charts (bar charts, timeline)
 - [x] Tool shows data quality warnings
 - [x] Tool shows MVP overnight limitation warning
 - [x] User can export Excel report
+
+#### Infrastructure
+- [x] GitHub Actions CI (pytest on Python 3.10/3.11/3.12)
+- [x] Dockerfile for containerized deployment
+- [x] E2E test passed (6/6 tests — KPIs, warnings, tables, charts, export)
 
 #### Pilot Readiness
 - [x] Sample DayRepReport file generated (358 flights)
@@ -50,6 +56,7 @@
 | Date | Milestone |
 |---|---|
 | 26/04/2026 | MVP code complete, all tests passing |
+| 26/04/2026 | E2E test passed (6/6), CI + Docker + Charts added |
 | TBD | Phase 0 — Internal validation with real DayRepReport |
 | TBD | Phase 1 — Shadowing with OCC Controller |
 | TBD | Phase 2 — Parallel Run with Duty Manager |

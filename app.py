@@ -9,6 +9,7 @@ from __future__ import annotations
 import tempfile
 from datetime import date, time
 
+import pandas as pd
 import streamlit as st
 
 from src.cascade.cascade_detector import compute_kpis, detect_cascade
@@ -98,6 +99,54 @@ col4.metric("Level 2", kpis["level_2_count"])
 col5.metric("Level 3+", kpis["level_3plus_count"])
 
 st.metric("Aircraft Affected", kpis["aircraft_affected"])
+
+# ─── Impact Distribution Chart ──────────────────────────────────────────
+st.subheader("Impact Analysis")
+
+chart_col1, chart_col2 = st.columns(2)
+
+with chart_col1:
+    st.markdown("**Impact Level Distribution**")
+    impact_data = pd.DataFrame({
+        "Impact Level": ["Level 1", "Level 2", "Level 3+", "Not Affected"],
+        "Count": [
+            kpis["level_1_count"],
+            kpis["level_2_count"],
+            kpis["level_3plus_count"],
+            kpis["total_flights"] - kpis["affected_flights"],
+        ],
+    })
+    impact_data = impact_data[impact_data["Count"] > 0]
+    st.bar_chart(impact_data.set_index("Impact Level"))
+
+with chart_col2:
+    st.markdown("**Affected vs Unaffected Flights**")
+    pie_data = pd.DataFrame({
+        "Category": ["Affected", "Not Affected"],
+        "Count": [
+            kpis["affected_flights"],
+            kpis["total_flights"] - kpis["affected_flights"],
+        ],
+    })
+    st.bar_chart(pie_data.set_index("Category"))
+
+# ─── Flight Timeline ───────────────────────────────────────────────────
+if not affected.empty:
+    st.markdown("**Affected Flights Timeline**")
+    timeline_df = affected.copy()
+    timeline_df = timeline_df[timeline_df["std"].notna()].copy()
+    if not timeline_df.empty:
+        timeline_df["hour"] = timeline_df["std"].apply(
+            lambda t: t.hour if t is not None else None
+        )
+        timeline_df = timeline_df[timeline_df["hour"].notna()]
+        hour_counts = timeline_df.groupby(["hour", "impact_level_display"]).size().reset_index(name="count")
+        pivot = hour_counts.pivot(index="hour", columns="impact_level_display", values="count").fillna(0)
+        st.bar_chart(pivot)
+        st.caption(
+            f"Closure window: {event.start_time.strftime('%H:%M')}–{event.end_time.strftime('%H:%M')} "
+            f"(shaded area represents closure period)"
+        )
 
 # ─── Affected Flights Table ─────────────────────────────────────────────
 st.subheader("Affected Flights")
