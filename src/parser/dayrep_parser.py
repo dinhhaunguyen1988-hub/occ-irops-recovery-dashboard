@@ -8,8 +8,8 @@ and returns a clean DataFrame with data quality warnings.
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from typing import Optional
+import unicodedata
+from datetime import date, datetime
 
 import pandas as pd
 
@@ -22,24 +22,45 @@ from src.config import (
 from src.parser.time_parser import parse_time_with_warning
 
 
+def _norm_header(s: object) -> str:
+    """Uppercase + NFC-normalize a header cell so Vietnamese aliases match.
+
+    Some AIMS exports emit decomposed (NFD) Vietnamese text; normalizing to
+    NFC ensures `"NG\u00c0Y"` (single codepoint) matches `"NGA\u0300Y"`
+    (decomposed) byte-for-byte.
+    """
+    return unicodedata.normalize("NFC", str(s).strip().upper())
+
+
 # ---------------------------------------------------------------------------
 # Aircraft registration normalization
 # ---------------------------------------------------------------------------
 
-def normalize_reg(raw: object) -> Optional[str]:
+
+def normalize_reg(raw: object) -> str | None:
     """Normalize an aircraft registration string.
 
     - Strips whitespace
     - Uppercases
     - Inserts hyphen for VN registrations missing it (e.g. VNA500 -> VN-A500)
     """
-    if raw is None or pd.isna(raw):
+    if raw is None:
         return None
+    try:
+        if bool(pd.isna(raw)):  # type: ignore[call-overload]
+            return None
+    except (TypeError, ValueError):
+        pass
 
     s = str(raw).strip().upper()
 
     if not s:
         return None
+
+    # Replace internal whitespace and slashes with a single hyphen so that
+    # ``VN A517`` / ``VN/A517`` both normalize to ``VN-A517``.
+    s = re.sub(r"[\s/]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
 
     # Convert VNA500 -> VN-A500
     if re.match(r"^VN[A-Z0-9]{3,5}$", s) and "-" not in s:
@@ -52,6 +73,7 @@ def normalize_reg(raw: object) -> Optional[str]:
 # Header detection
 # ---------------------------------------------------------------------------
 
+
 def find_header_row(df_raw: pd.DataFrame) -> int:
     """Find the header row index by keyword matching.
 
@@ -61,21 +83,21 @@ def find_header_row(df_raw: pd.DataFrame) -> int:
     Raises ``ValueError`` if no header row is found.
     """
     for i, row in df_raw.iterrows():
-        row_upper = [str(v).strip().upper() for v in row]
+        row_upper = [_norm_header(v) for v in row]
         matched = sum(
             1
             for aliases in HEADER_KEYWORD_MAP.values()
             if any(alias in row_upper for alias in aliases)
         )
         if matched >= MIN_HEADER_MATCH:
-            return int(i)
+            return int(i)  # type: ignore[call-overload]
 
     raise ValueError("HEADER_NOT_FOUND: Cannot detect header row in DayRepReport")
 
 
-def _map_column(col_name: str) -> Optional[str]:
+def _map_column(col_name: str) -> str | None:
     """Map a raw column name to its canonical name using keyword aliases."""
-    col_upper = col_name.strip().upper()
+    col_upper = _norm_header(col_name)
     canonical_map = {
         "DATE": "flight_date",
         "FLT": "flight_no",
@@ -96,15 +118,22 @@ def _map_column(col_name: str) -> Optional[str]:
 # Footer / invalid row filtering
 # ---------------------------------------------------------------------------
 
+
 def _is_valid_flight_row(row: pd.Series) -> bool:
     """Return True if the row looks like a valid flight record."""
     flt = str(row.get("flight_no", "")).strip()
     date_val = str(row.get("flight_date", "")).strip()
 
-    if not flt or not date_val:
+    if not flt or flt.lower() == "nan":
+        return False
+    if not date_val or date_val.lower() == "nan":
         return False
 
-    # Flight number should match pattern
+    # Flight number must contain at least one digit (distinguishes from footer text)
+    if not re.search(r"\d", flt):
+        return False
+
+    # Flight number should match pattern (airline prefix + digits)
     if not re.match(FLIGHT_NO_PATTERN, flt):
         return False
 
@@ -114,6 +143,7 @@ def _is_valid_flight_row(row: pd.Series) -> bool:
 # ---------------------------------------------------------------------------
 # Main parser
 # ---------------------------------------------------------------------------
+
 
 def parse_dayrep_report(
     file_path: str,
@@ -148,7 +178,7 @@ def parse_dayrep_report(
 
     # 3. Extract header names and data rows
     raw_headers = [str(v).strip() for v in df_raw.iloc[header_idx]]
-    df_data = df_raw.iloc[header_idx + 1:].copy()
+    df_data = df_raw.iloc[header_idx + 1 :].copy()
     df_data.columns = raw_headers
     df_data = df_data.reset_index(drop=True)
 
@@ -163,8 +193,14 @@ def parse_dayrep_report(
 
     # Keep only canonical columns that exist
     canonical_cols = [
-        "flight_date", "flight_no", "aircraft_reg", "aircraft_type",
-        "origin", "destination", "std", "sta",
+        "flight_date",
+        "flight_no",
+        "aircraft_reg",
+        "aircraft_type",
+        "origin",
+        "destination",
+        "std",
+        "sta",
     ]
     existing_cols = [c for c in canonical_cols if c in df_data.columns]
     df_data = df_data[existing_cols].copy()
@@ -175,7 +211,18 @@ def parse_dayrep_report(
     # 5. Basic cleanup — convert everything to string for uniform processing
     for col in ["flight_no", "aircraft_reg", "aircraft_type", "origin", "destination"]:
         if col in df_data.columns:
-            df_data[col] = df_data[col].astype(str).str.strip()
+            # Handle numeric values (Excel may store flight_no as float like 1234.0)
+            df_data[col] = (
+                df_data[col]
+                .apply(
+                    lambda v: (
+                        str(int(v))
+                        if isinstance(v, float) and not pd.isna(v) and v == int(v)
+                        else str(v)
+                    )
+                )
+                .str.strip()
+            )
 
     # 6. Normalize aircraft registration
     if "aircraft_reg" in df_data.columns:
@@ -200,9 +247,7 @@ def parse_dayrep_report(
             t, warn = parse_time_with_warning(raw_val)
             parsed_times.append(t)
             if warn:
-                warnings.append(
-                    f"{warn} at row {df_data.at[idx, 'raw_row_number']} col {time_col}"
-                )
+                warnings.append(f"{warn} at row {df_data.at[idx, 'raw_row_number']} col {time_col}")
                 existing_warn = df_data.at[idx, "data_quality_warning"]
                 if existing_warn:
                     df_data.at[idx, "data_quality_warning"] = f"{existing_warn}; {warn}"
@@ -212,9 +257,13 @@ def parse_dayrep_report(
 
     # 8. Parse flight date
     if "flight_date" in df_data.columns:
-        parsed_dates = []
+        parsed_dates: list[date | None] = []
         for idx, raw_val in df_data["flight_date"].items():
-            if pd.isna(raw_val) or str(raw_val).strip() == "" or str(raw_val).strip().lower() == "nan":
+            try:
+                is_null = bool(pd.isna(raw_val))
+            except (TypeError, ValueError):
+                is_null = raw_val is None
+            if is_null or str(raw_val).strip() == "" or str(raw_val).strip().lower() == "nan":
                 parsed_dates.append(None)
                 continue
             raw_str = str(raw_val).strip()
@@ -241,9 +290,7 @@ def parse_dayrep_report(
     skipped_count = (~valid_mask).sum()
     if skipped_count > 0:
         for idx in df_data[~valid_mask].index:
-            warnings.append(
-                f"FOOTER_ROW_SKIPPED: row {df_data.at[idx, 'raw_row_number']}"
-            )
+            warnings.append(f"FOOTER_ROW_SKIPPED: row {df_data.at[idx, 'raw_row_number']}")
     df_data = df_data[valid_mask].reset_index(drop=True)
 
     return df_data, warnings

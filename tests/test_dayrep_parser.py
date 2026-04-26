@@ -1,11 +1,12 @@
 """Tests for DayRepReport parser and REG normalization."""
 
-import pytest
-import pandas as pd
-import tempfile
 import os
+import tempfile
 
-from src.parser.dayrep_parser import normalize_reg, find_header_row, parse_dayrep_report
+import pandas as pd
+import pytest
+
+from src.parser.dayrep_parser import find_header_row, normalize_reg, parse_dayrep_report
 
 
 class TestNormalizeReg:
@@ -48,7 +49,16 @@ class TestFindHeaderRow:
     def test_variant_header_names(self):
         data = [
             ["Title", "", "", "", "", "", "", ""],
-            ["FLIGHT DATE", "FLT NO", "REGISTRATION", "AIRCRAFT TYPE", "FROM", "TO", "SCHED DEP", "SCHED ARR"],
+            [
+                "FLIGHT DATE",
+                "FLT NO",
+                "REGISTRATION",
+                "AIRCRAFT TYPE",
+                "FROM",
+                "TO",
+                "SCHED DEP",
+                "SCHED ARR",
+            ],
             ["24/04/2026", "1504", "VN-A500", "A321", "DAD", "HAN", "12:40", "14:00"],
         ]
         df = pd.DataFrame(data)

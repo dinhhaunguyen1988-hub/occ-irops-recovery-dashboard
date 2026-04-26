@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from io import BytesIO
 from datetime import time
+from io import BytesIO
 
 import pandas as pd
 
@@ -66,10 +66,18 @@ def export_to_excel(
         # --- Affected Flights sheet ---
         affected = df[df["impact_level_numeric"].notna()].copy()
         display_cols = [
-            "flight_no", "aircraft_reg", "aircraft_type",
-            "origin", "destination", "std", "sta",
-            "impact_level_display", "impact_reason",
+            "flight_no",
+            "aircraft_reg",
+            "aircraft_type",
+            "origin",
+            "destination",
+            "std",
+            "sta",
+            "impact_level_display",
+            "impact_reason",
+            "impact_explanation",
             "cascade_root_flight",
+            "data_quality_warning",
         ]
         existing_display_cols = [c for c in display_cols if c in affected.columns]
         affected_display = affected[existing_display_cols].copy()
