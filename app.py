@@ -19,6 +19,7 @@ from src.cascade.ranking import compute_priority
 from src.config import MVP_LIMITATION_WARNING
 from src.export.excel_exporter import export_to_excel
 from src.export.pdf_briefing import build_briefing_pdf
+from src.i18n import available_locales, set_locale, t
 from src.impact import estimate_pax_and_cost
 from src.logging_config import get_logger, setup_logging
 from src.models.event import CLOSURE_TYPES, AirportClosureEvent
@@ -61,8 +62,18 @@ init_db(db_conn)
 settings_blob = get_settings(db_conn)
 estimator_kwargs = settings_to_estimator_kwargs(settings_blob)
 
+# ─── Locale toggle (must come before any t(...) call below) ────────────
+locales = available_locales()
+locale_choice = st.sidebar.selectbox(
+    "🌐 Language / Ngôn ngữ",
+    options=locales,
+    index=0,
+    format_func=lambda c: {"vi": "Tiếng Việt", "en": "English"}.get(c, c),
+)
+set_locale(locale_choice)
+
 # ─── Sidebar ────────────────────────────────────────────────────────────
-st.sidebar.title("OCC IROPS Recovery Dashboard")
+st.sidebar.title(t("sidebar.title"))
 st.sidebar.markdown("---")
 
 uploaded_files = st.sidebar.file_uploader(
@@ -127,7 +138,7 @@ if whatif_enabled:
 run_analysis = st.sidebar.button("Run Analysis", type="primary")
 
 # ─── Main area ──────────────────────────────────────────────────────────
-st.title("OCC IROPS Recovery Dashboard")
+st.title(t("app.title"))
 
 st.warning(MVP_LIMITATION_WARNING)
 
