@@ -44,3 +44,23 @@ def test_affected_defined_before_first_use():
     assert first_def_line < first_use_line, (
         f"`affected` is used at line {first_use_line} before being defined at line {first_def_line}"
     )
+
+
+def test_analysis_state_persists_via_session_state():
+    """Run-Analysis state must be persisted in st.session_state so post-analysis
+    button clicks (e.g. Run stress test, Settings) don't trigger a Streamlit
+    rerun that wipes the entire result page.
+
+    Regression guard for the Sprint 7 state-loss bug where clicking
+    'Run stress test' inside the result block reset the page back to
+    'Configure parameters in the sidebar and click Run Analysis'.
+    """
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert 'st.session_state["analysis_active"] = True' in source, (
+        "Run Analysis click handler must set st.session_state['analysis_active'] "
+        "so post-analysis widget reruns don't lose the result page."
+    )
+    assert 'st.session_state.get("analysis_active")' in source, (
+        "Gate that decides whether to render results must read "
+        "st.session_state['analysis_active'], not just the button click."
+    )

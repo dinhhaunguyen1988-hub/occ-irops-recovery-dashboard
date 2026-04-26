@@ -141,7 +141,10 @@ if whatif_enabled:
         "What-if End Time", value=event_inputs[0]["end_time"], key="wi_end"
     )
 
-run_analysis = st.sidebar.button("Run Analysis", type="primary")
+run_analysis_clicked = st.sidebar.button("Run Analysis", type="primary")
+if run_analysis_clicked:
+    st.session_state["analysis_active"] = True
+analysis_active = bool(st.session_state.get("analysis_active"))
 
 # ─── Main area ──────────────────────────────────────────────────────────
 st.title(t("app.title"))
@@ -152,7 +155,7 @@ if not uploaded_files:
     st.info("Upload one or more DayRepReport files in the sidebar to begin analysis.")
     st.stop()
 
-if not run_analysis:
+if not analysis_active:
     st.info("Configure parameters in the sidebar and click **Run Analysis**.")
     st.stop()
 
