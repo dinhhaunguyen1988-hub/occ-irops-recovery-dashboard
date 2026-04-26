@@ -52,6 +52,9 @@ from src.visualization.map_view import build_airport_map
 setup_logging()
 logger = get_logger(__name__)
 
+setup_logging()
+logger = get_logger(__name__)
+
 st.set_page_config(page_title="OCC IROPS Recovery Dashboard", layout="wide")
 
 # ─── Auth gate ─────────────────────────────────────────────────────────
@@ -217,6 +220,15 @@ logger.info(
     "parse_completed",
     extra={
         "file_hashes": file_hashes,
+        "rows_parsed": int(len(df)),
+        "warnings_count": len(parse_warnings),
+    },
+)
+
+logger.info(
+    "parse_completed",
+    extra={
+        "file_hash": file_hash,
         "rows_parsed": int(len(df)),
         "warnings_count": len(parse_warnings),
     },
