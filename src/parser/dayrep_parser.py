@@ -8,8 +8,7 @@ and returns a clean DataFrame with data quality warnings.
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
 
 import pandas as pd
 
@@ -21,20 +20,25 @@ from src.config import (
 )
 from src.parser.time_parser import parse_time_with_warning
 
-
 # ---------------------------------------------------------------------------
 # Aircraft registration normalization
 # ---------------------------------------------------------------------------
 
-def normalize_reg(raw: object) -> Optional[str]:
+
+def normalize_reg(raw: object) -> str | None:
     """Normalize an aircraft registration string.
 
     - Strips whitespace
     - Uppercases
     - Inserts hyphen for VN registrations missing it (e.g. VNA500 -> VN-A500)
     """
-    if raw is None or pd.isna(raw):
+    if raw is None:
         return None
+    try:
+        if bool(pd.isna(raw)):  # type: ignore[call-overload]
+            return None
+    except (TypeError, ValueError):
+        pass
 
     s = str(raw).strip().upper()
 
@@ -52,6 +56,7 @@ def normalize_reg(raw: object) -> Optional[str]:
 # Header detection
 # ---------------------------------------------------------------------------
 
+
 def find_header_row(df_raw: pd.DataFrame) -> int:
     """Find the header row index by keyword matching.
 
@@ -68,12 +73,12 @@ def find_header_row(df_raw: pd.DataFrame) -> int:
             if any(alias in row_upper for alias in aliases)
         )
         if matched >= MIN_HEADER_MATCH:
-            return int(i)
+            return int(i)  # type: ignore[call-overload]
 
     raise ValueError("HEADER_NOT_FOUND: Cannot detect header row in DayRepReport")
 
 
-def _map_column(col_name: str) -> Optional[str]:
+def _map_column(col_name: str) -> str | None:
     """Map a raw column name to its canonical name using keyword aliases."""
     col_upper = col_name.strip().upper()
     canonical_map = {
@@ -95,6 +100,7 @@ def _map_column(col_name: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Footer / invalid row filtering
 # ---------------------------------------------------------------------------
+
 
 def _is_valid_flight_row(row: pd.Series) -> bool:
     """Return True if the row looks like a valid flight record."""
@@ -120,6 +126,7 @@ def _is_valid_flight_row(row: pd.Series) -> bool:
 # ---------------------------------------------------------------------------
 # Main parser
 # ---------------------------------------------------------------------------
+
 
 def parse_dayrep_report(
     file_path: str,
@@ -154,7 +161,7 @@ def parse_dayrep_report(
 
     # 3. Extract header names and data rows
     raw_headers = [str(v).strip() for v in df_raw.iloc[header_idx]]
-    df_data = df_raw.iloc[header_idx + 1:].copy()
+    df_data = df_raw.iloc[header_idx + 1 :].copy()
     df_data.columns = raw_headers
     df_data = df_data.reset_index(drop=True)
 
@@ -169,8 +176,14 @@ def parse_dayrep_report(
 
     # Keep only canonical columns that exist
     canonical_cols = [
-        "flight_date", "flight_no", "aircraft_reg", "aircraft_type",
-        "origin", "destination", "std", "sta",
+        "flight_date",
+        "flight_no",
+        "aircraft_reg",
+        "aircraft_type",
+        "origin",
+        "destination",
+        "std",
+        "sta",
     ]
     existing_cols = [c for c in canonical_cols if c in df_data.columns]
     df_data = df_data[existing_cols].copy()
@@ -182,9 +195,17 @@ def parse_dayrep_report(
     for col in ["flight_no", "aircraft_reg", "aircraft_type", "origin", "destination"]:
         if col in df_data.columns:
             # Handle numeric values (Excel may store flight_no as float like 1234.0)
-            df_data[col] = df_data[col].apply(
-                lambda v: str(int(v)) if isinstance(v, float) and not pd.isna(v) and v == int(v) else str(v)
-            ).str.strip()
+            df_data[col] = (
+                df_data[col]
+                .apply(
+                    lambda v: (
+                        str(int(v))
+                        if isinstance(v, float) and not pd.isna(v) and v == int(v)
+                        else str(v)
+                    )
+                )
+                .str.strip()
+            )
 
     # 6. Normalize aircraft registration
     if "aircraft_reg" in df_data.columns:
@@ -209,9 +230,7 @@ def parse_dayrep_report(
             t, warn = parse_time_with_warning(raw_val)
             parsed_times.append(t)
             if warn:
-                warnings.append(
-                    f"{warn} at row {df_data.at[idx, 'raw_row_number']} col {time_col}"
-                )
+                warnings.append(f"{warn} at row {df_data.at[idx, 'raw_row_number']} col {time_col}")
                 existing_warn = df_data.at[idx, "data_quality_warning"]
                 if existing_warn:
                     df_data.at[idx, "data_quality_warning"] = f"{existing_warn}; {warn}"
@@ -221,9 +240,13 @@ def parse_dayrep_report(
 
     # 8. Parse flight date
     if "flight_date" in df_data.columns:
-        parsed_dates = []
+        parsed_dates: list[date | None] = []
         for idx, raw_val in df_data["flight_date"].items():
-            if pd.isna(raw_val) or str(raw_val).strip() == "" or str(raw_val).strip().lower() == "nan":
+            try:
+                is_null = bool(pd.isna(raw_val))
+            except (TypeError, ValueError):
+                is_null = raw_val is None
+            if is_null or str(raw_val).strip() == "" or str(raw_val).strip().lower() == "nan":
                 parsed_dates.append(None)
                 continue
             raw_str = str(raw_val).strip()
@@ -250,9 +273,7 @@ def parse_dayrep_report(
     skipped_count = (~valid_mask).sum()
     if skipped_count > 0:
         for idx in df_data[~valid_mask].index:
-            warnings.append(
-                f"FOOTER_ROW_SKIPPED: row {df_data.at[idx, 'raw_row_number']}"
-            )
+            warnings.append(f"FOOTER_ROW_SKIPPED: row {df_data.at[idx, 'raw_row_number']}")
     df_data = df_data[valid_mask].reset_index(drop=True)
 
     return df_data, warnings

@@ -17,8 +17,7 @@ class AirportClosureEvent:
         self.airport = self.airport.strip().upper()
         if self.start_time >= self.end_time:
             raise ValueError(
-                f"Closure start time ({self.start_time}) must be before "
-                f"end time ({self.end_time})"
+                f"Closure start time ({self.start_time}) must be before end time ({self.end_time})"
             )
 
     def __str__(self) -> str:

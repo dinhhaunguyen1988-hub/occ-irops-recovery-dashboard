@@ -13,20 +13,30 @@ Handles all known AIMS DayRepReport time formats:
 from __future__ import annotations
 
 from datetime import datetime, time
-from typing import Optional
+from typing import Any
 
 import pandas as pd
 
 from src.config import NULL_TIME_VALUES
 
 
-def parse_time_field(raw: object) -> Optional[time]:
+def _is_nullish(raw: Any) -> bool:
+    """Return True if a scalar value is None / NaN / NaT."""
+    if raw is None:
+        return True
+    try:
+        return bool(pd.isna(raw))
+    except (TypeError, ValueError):
+        return False
+
+
+def parse_time_field(raw: object) -> time | None:
     """Parse a raw AIMS time value into a ``datetime.time`` or ``None``.
 
     Returns ``None`` for null / placeholder values.  Unparseable values also
     return ``None`` — callers should check for warnings separately.
     """
-    if pd.isna(raw):
+    if _is_nullish(raw):
         return None
 
     s = str(raw).strip().upper()
@@ -52,7 +62,7 @@ def parse_time_field(raw: object) -> Optional[time]:
         return None
 
 
-def parse_time_with_warning(raw: object) -> tuple[Optional[time], Optional[str]]:
+def parse_time_with_warning(raw: object) -> tuple[time | None, str | None]:
     """Parse a time field and return a warning string if unparseable.
 
     Returns
@@ -61,7 +71,7 @@ def parse_time_with_warning(raw: object) -> tuple[Optional[time], Optional[str]]
         ``warning`` is ``None`` when parsing succeeds or the value is a
         recognized null/placeholder.
     """
-    if pd.isna(raw):
+    if _is_nullish(raw):
         return None, None
 
     s_check = str(raw).strip().upper()

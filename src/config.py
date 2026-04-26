@@ -3,13 +3,13 @@
 # Header keyword mapping for dynamic header detection in AIMS DayRepReport
 HEADER_KEYWORD_MAP = {
     "DATE": ["DATE", "DATE OPS", "FLIGHT DATE"],
-    "FLT":  ["FLT", "FLT NO", "FLIGHT", "FLIGHT NO"],
-    "REG":  ["REG", "REGISTRATION", "TAIL"],
-    "AC":   ["AC", "ACTYPE", "AIRCRAFT TYPE", "TYPE", "A/C"],
-    "DEP":  ["DEP", "FROM", "ORIGIN", "DEP STN"],
-    "ARR":  ["ARR", "TO", "DEST", "ARR STN"],
-    "STD":  ["STD", "SCHED DEP", "SCHEDULED DEP"],
-    "STA":  ["STA", "SCHED ARR", "SCHEDULED ARR"],
+    "FLT": ["FLT", "FLT NO", "FLIGHT", "FLIGHT NO"],
+    "REG": ["REG", "REGISTRATION", "TAIL"],
+    "AC": ["AC", "ACTYPE", "AIRCRAFT TYPE", "TYPE", "A/C"],
+    "DEP": ["DEP", "FROM", "ORIGIN", "DEP STN"],
+    "ARR": ["ARR", "TO", "DEST", "ARR STN"],
+    "STD": ["STD", "SCHED DEP", "SCHEDULED DEP"],
+    "STA": ["STA", "SCHED ARR", "SCHEDULED ARR"],
 }
 
 # Minimum number of header keyword groups that must match to identify the header row
